@@ -1,0 +1,13 @@
+{
+  "name": "monopoly-online",
+  "version": "1.0.0",
+  "description": "多人联机大富翁 - 浏览器客户端 + Node.js WebSocket 服务端",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node test/simulate.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}

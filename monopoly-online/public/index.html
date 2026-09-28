@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>大富翁 · 多人联机</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ==================== 房间界面 ==================== -->
+<div id="lobby" class="lobby">
+  <div class="lobby-card">
+    <h1>🎲 大富翁 · 多人联机</h1>
+    <p class="subtitle">经典地产大亨，与朋友同屏过招</p>
+    <div class="form-group">
+      <label>你的昵称</label>
+      <input id="nickname" maxlength="12" placeholder="输入昵称" value="">
+    </div>
+    <div class="lobby-actions">
+      <button id="btnCreate" class="btn btn-primary">创建房间</button>
+      <div class="or">— 或 —</div>
+      <div class="join-row">
+        <input id="roomCode" maxlength="4" placeholder="房间码" class="room-code">
+        <button id="btnJoin" class="btn btn-secondary">加入房间</button>
+      </div>
+    </div>
+    <p class="tip">同一 Wi-Fi 下，把房间码告诉朋友即可加入</p>
+    <div id="lobbyError" class="error hidden"></div>
+  </div>
+</div>
+
+<!-- ==================== 游戏界面 ==================== -->
+<div id="game" class="game hidden">
+  <!-- 左侧：棋盘 -->
+  <div class="board-wrap">
+    <div id="board" class="board"></div>
+    <div class="board-center">
+      <div class="center-title">🎲 大富翁</div>
+      <div id="roomInfo" class="room-info">房间：----</div>
+      <div id="diceArea" class="dice-area">
+        <div id="die1" class="die">·</div>
+        <div id="die2" class="die">·</div>
+      </div>
+      <div id="turnInfo" class="turn-info"></div>
+      <div id="actionArea" class="action-area"></div>
+      <div id="buyArea" class="buy-area hidden"></div>
+    </div>
+  </div>
+
+  <!-- 右侧：面板 -->
+  <div class="side-panel">
+    <div id="playersPanel" class="players-panel"></div>
+
+    <div id="propertyPanel" class="property-panel">
+      <div class="panel-title">我的地产 <span id="buildHint" class="build-hint"></span></div>
+      <div id="myProperties" class="my-properties"></div>
+    </div>
+
+    <div class="log-panel">
+      <div class="panel-title">事件记录</div>
+      <div id="logList" class="log-list"></div>
+    </div>
+
+    <div class="chat-panel">
+      <div class="panel-title">聊天</div>
+      <div id="chatList" class="chat-list"></div>
+      <div class="chat-input-row">
+        <input id="chatInput" maxlength="200" placeholder="说点什么…">
+        <button id="btnChat" class="btn btn-small">发送</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="client.js"></script>
+</body>
+</html>
