@@ -33,6 +33,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("show-tools", help="打印工具清单和自动生成的 JSON Schema")
 
+    demo_agent = sub.add_parser("demo-agent", help="用 FakeLLM 演示完整的 ReAct 循环（不需要 API key）")
+    demo_agent.add_argument("--max-steps", type=int, default=6)
+
+    ask = sub.add_parser("ask", help="用真实模型跑一个任务（需要配置 API key）")
+    ask.add_argument("question", help="你要问的问题")
+    ask.add_argument("--max-steps", type=int, default=6, help="最多迭代步数")
+
     # -- 未来的子命令都会加在这里 --
     # sub.add_parser("serve", help="启动本地 HTTP 服务 / Web UI")
     # sub.add_parser("ingest", help="录入一篇知识")
@@ -62,6 +69,71 @@ def run_demo_llm(speed: float) -> int:
     print("\n")
     print(f"（共 {len(text)} 个字，切成 {len(range(0, len(text), 2))} 个片段到达）")
     return 0
+
+
+def print_steps(result) -> None:
+    """把 AgentResult 的轨迹打印成人类可读的时间线。"""
+    print(f"\n=== 执行轨迹（{len(result.steps)} 步，{result.usage.total_tokens} tokens）===")
+    for step in result.steps:
+        print(f"[{step.index}] 思考：{step.thought or '（无）'}")
+        if step.kind == "final":
+            print(f"    最终：{step.observation}")
+        elif step.tool:
+            args = ", ".join(f"{k}={v!r}" for k, v in step.arguments.items())
+            print(f"    行动：{step.tool}({args})")
+            print(f"    观察：{step.observation}")
+        elif step.kind == "error":
+            print(f"    错误：{step.observation}")
+    print(f"\n=== 结果 ===\n{result.answer or '（无答案）'}")
+    print(f"结束原因：{result.stop_reason}")
+
+
+def run_demo_agent(max_steps: int) -> int:
+    """用假模型跑一遍完整循环——不联网也能看懂 Agent 在干什么。"""
+    from .agent import ReActAgent
+    from .builtin_tools import default_registry
+    from .llm import FakeLLM
+
+    script = [
+        json.dumps(
+            {"thought": "要算 12*34+56，先调用计算器",
+             "action": {"tool": "calculator", "args": {"expression": "12*34+56"}}},
+            ensure_ascii=False,
+        ),
+        json.dumps(
+            {"thought": "计算器返回了 464，可以回答了",
+             "final": "12×34+56 = 464"},
+            ensure_ascii=False,
+        ),
+    ]
+
+    agent = ReActAgent(FakeLLM(script), default_registry(), max_steps=max_steps)
+    print("用户：帮我算 12*34+56")
+    result = agent.run("帮我算 12*34+56")
+    print_steps(result)
+    print("\n提示：这次用的是脚本化的 FakeLLM，所以轨迹完全可复现；")
+    print("      配置好 API key 后用 `agentlab ask \"问题\"` 接真实模型。")
+    return 0 if result.ok else 1
+
+
+def run_ask(config, question: str, max_steps: int) -> int:
+    """用真实模型回答一个问题。"""
+    from .agent import ReActAgent
+    from .builtin_tools import default_registry
+    from .llm import LLMError, make_llm
+
+    try:
+        llm = make_llm(config)
+    except LLMError as exc:
+        print(f"无法启动：{exc}")
+        print("提示：先跑 `python -m agentlab demo-agent` 看看效果（不需要 key）。")
+        return 1
+
+    agent = ReActAgent(llm, default_registry(), max_steps=max_steps)
+    print(f"用户：{question}")
+    result = agent.run(question)
+    print_steps(result)
+    return 0 if result.ok else 1
 
 
 def run_show_tools() -> int:
@@ -111,6 +183,10 @@ def main(argv: list[str] | None = None) -> int:
         return run_demo_llm(args.speed)
     if args.command == "show-tools":
         return run_show_tools()
+    if args.command == "demo-agent":
+        return run_demo_agent(args.max_steps)
+    if args.command == "ask":
+        return run_ask(config, args.question, args.max_steps)
 
     logger.warning("命令 %r 尚未实现", args.command)
     return 1
