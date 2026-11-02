@@ -25,7 +25,7 @@ import json
 import logging
 import re
 from dataclasses import dataclass, field
-from typing import Any, Sequence
+from typing import Any, Callable, Sequence
 
 from .llm import ChatModel, LLMError, Message, Usage
 from .tools import ToolError, ToolRegistry
@@ -238,11 +238,21 @@ class ReActAgent:
 
     # ---------- 对外主入口 ----------
 
-    def run(self, task: str, *, history: Sequence[Message] | None = None) -> AgentResult:
+    def run(
+        self,
+        task: str,
+        *,
+        history: Sequence[Message] | None = None,
+        on_step: Callable[[AgentStep], None] | None = None,
+    ) -> AgentResult:
         """跑完一个任务。
 
         ``history`` 用于多轮对话：把之前的 user/assistant 消息接进来，
         但 system 提示每次重建（因为工具清单可能变）。
+
+        ``on_step`` 是每一步完成时的回调——Web 界面用它把「思考/调用了什么工具/
+        观察到了什么」实时推给浏览器。用回调而不是返回值列表，是因为
+        调用方要在**过程中**就拿到数据，而不是等整个任务结束。
         """
         messages: list[Message] = [{"role": "system", "content": self.system_prompt}]
         if history:
@@ -250,6 +260,16 @@ class ReActAgent:
         messages.append({"role": "user", "content": task})
 
         steps: list[AgentStep] = []
+
+        def emit(step: AgentStep) -> None:
+            """记录一步，并实时推给调用方。回调异常不能影响主流程。"""
+            steps.append(step)
+            if on_step is not None:
+                try:
+                    on_step(step)
+                except Exception:
+                    logger.exception("on_step 回调异常，已忽略")
+
         total_usage = Usage()
         parse_failures = 0
         last_observation: str | None = None
@@ -259,7 +279,7 @@ class ReActAgent:
                 response = self.llm.chat(messages)
             except LLMError as exc:
                 logger.error("第 %d 步模型调用失败：%s", index, exc)
-                steps.append(AgentStep(index=index, kind="error", observation=str(exc)))
+                emit(AgentStep(index=index, kind="error", observation=str(exc)))
                 return AgentResult(
                     answer="",
                     steps=steps,
@@ -277,7 +297,7 @@ class ReActAgent:
             except ValueError as exc:
                 parse_failures += 1
                 logger.warning("第 %d 步输出无法解析：%s", index, exc)
-                steps.append(
+                emit(
                     AgentStep(index=index, kind="error", raw=response.text,
                               observation=str(exc), usage=response.usage)
                 )
@@ -305,7 +325,7 @@ class ReActAgent:
             # ---- 情况 B：给出最终答案 ----
             parse_failures = 0  # 一旦解析成功，连续失败计数清零
             if decision.kind == "final":
-                steps.append(
+                emit(
                     AgentStep(index=index, kind="final", thought=decision.thought,
                               observation=decision.answer, raw=response.text,
                               usage=response.usage)
@@ -331,7 +351,7 @@ class ReActAgent:
                 logger.info("工具 %s 失败：%s", decision.tool, exc)
 
             last_observation = observation
-            steps.append(
+            emit(
                 AgentStep(index=index, kind="action", thought=decision.thought,
                           tool=decision.tool, arguments=decision.arguments,
                           observation=observation, raw=response.text,

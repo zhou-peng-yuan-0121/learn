@@ -55,6 +55,10 @@ def build_parser() -> argparse.ArgumentParser:
     search.add_argument("--mode", choices=["hybrid", "keyword", "vector"], default="hybrid")
     search.add_argument("--explain", action="store_true", help="显示每条结果来自哪一路")
 
+    serve = sub.add_parser("serve", help="启动本地 Web 界面（浏览器里录入/检索/对话）")
+    serve.add_argument("--host", default=None, help="监听地址，默认 127.0.0.1")
+    serve.add_argument("--port", type=int, default=None, help="端口，默认 7860")
+
     # -- 未来的子命令都会加在这里 --
     # sub.add_parser("serve", help="启动本地 HTTP 服务 / Web UI")
     # sub.add_parser("ingest", help="录入一篇知识")
@@ -257,6 +261,22 @@ def run_docs(config, limit: int) -> int:
     return 0
 
 
+def run_serve(config, host: str | None, port: int | None) -> int:
+    """启动本地 Web 服务。"""
+    from .server import KnowledgeServer
+
+    server = KnowledgeServer(config, host=host, port=port)
+    print(f"agentlab 已启动：{server.url}")
+    print("在浏览器打开上面的地址即可录入 / 检索 / 对话。按 Ctrl+C 停止。")
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\n正在停止…")
+    finally:
+        server.shutdown()
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     """程序入口，返回退出码。"""
     # 最先加载 .env（在任何可能用到 API key 的操作之前）
@@ -297,6 +317,8 @@ def main(argv: list[str] | None = None) -> int:
         return run_docs(config, args.limit)
     if args.command == "search":
         return run_search(config, args.query, args.top_k, args.mode, args.explain)
+    if args.command == "serve":
+        return run_serve(config, args.host, args.port)
 
     logger.warning("命令 %r 尚未实现", args.command)
     return 1

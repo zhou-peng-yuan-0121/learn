@@ -40,6 +40,11 @@ class Config:
     # ----- 日志 -----
     log_level: str = "INFO"
 
+    # ----- 数据目录 -----
+    # 做成字段而不是写死常量，是为了让测试能指到临时目录，
+    # 否则跑一次测试就会污染用户真实的 data/knowledge.db
+    data_dir: Path = PROJECT_ROOT / "data"
+
     @classmethod
     def from_env(cls, source: Mapping[str, str] | None = None) -> "Config":
         """从环境变量读取配置，给默认值兜底。"""
@@ -71,6 +76,7 @@ class Config:
             host=pick("AGENTLAB_HOST", "127.0.0.1"),
             port=pick_int("AGENTLAB_PORT", 7860),
             log_level=log_level,
+            data_dir=Path(pick("AGENTLAB_DATA_DIR", str(PROJECT_ROOT / "data"))),
         )
 
     @property
@@ -87,11 +93,10 @@ class Config:
         """
         return replace(self, **kwargs)
 
-    def data_dir(self):
-        """返回数据目录路径，并在首次访问时自动创建。"""
-        d = PROJECT_ROOT / "data"
-        d.mkdir(parents=True, exist_ok=True)
-        return d
+    def ensure_data_dir(self) -> Path:
+        """返回数据目录，首次访问时自动创建。"""
+        self.data_dir.mkdir(parents=True, exist_ok=True)
+        return self.data_dir
 
 
 def load_dotenv_if_available() -> None:

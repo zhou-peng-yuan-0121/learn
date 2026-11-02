@@ -16,3 +16,6 @@ agentlab = "agentlab.__main__:main"
 
 [tool.setuptools.packages.find]
 include = ["agentlab*"]
+
+[tool.setuptools.package-data]
+agentlab = ["static/*.html"]

@@ -1,0 +1,302 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>agentlab · 个人知识库</title>
+<style>
+  :root {
+    --bg: #0f1115; --panel: #171a21; --border: #262b36;
+    --text: #e6e8ee; --muted: #8b93a7; --accent: #6ea8fe; --ok: #4ade80; --warn: #fbbf24;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.6 -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+  }
+  header {
+    display: flex; align-items: baseline; gap: 16px;
+    padding: 18px 24px; border-bottom: 1px solid var(--border);
+  }
+  header h1 { margin: 0; font-size: 18px; letter-spacing: .5px; }
+  header .stats { color: var(--muted); font-size: 12px; }
+  main { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; padding: 20px 24px; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+  section { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
+  h2 { margin: 0 0 12px; font-size: 13px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); }
+  h2:not(:first-child) { margin-top: 20px; }
+  input, textarea, button {
+    width: 100%; background: #0d1016; color: var(--text);
+    border: 1px solid var(--border); border-radius: 8px;
+    padding: 9px 11px; font: inherit; margin-bottom: 8px;
+  }
+  textarea { min-height: 96px; resize: vertical; }
+  button {
+    background: var(--accent); color: #08111f; border: none;
+    font-weight: 600; cursor: pointer;
+  }
+  button:disabled { opacity: .5; cursor: wait; }
+  button.ghost { background: #232833; color: var(--text); }
+  .msg { font-size: 12px; color: var(--muted); min-height: 18px; }
+  .msg.ok { color: var(--ok); } .msg.err { color: #f87171; }
+  ul#docs, ol#search-log { list-style: none; margin: 0; padding: 0; }
+  ul#docs li {
+    display: flex; justify-content: space-between; gap: 8px;
+    padding: 7px 0; border-bottom: 1px dashed var(--border); font-size: 13px;
+  }
+  ul#docs li .meta { color: var(--muted); font-size: 11px; white-space: nowrap; }
+  #chat-log { min-height: 260px; max-height: 460px; overflow-y: auto; margin-bottom: 10px; }
+  .bubble { margin: 8px 0; padding: 9px 12px; border-radius: 10px; white-space: pre-wrap; word-break: break-word; }
+  .bubble.user { background: #1d2637; }
+  .bubble.final { background: #16281f; border-left: 3px solid var(--ok); }
+  .bubble.err { background: #2a1a1c; border-left: 3px solid #f87171; }
+  .bubble.note { color: var(--warn); font-size: 12px; }
+  .step { margin: 6px 0 6px 3px; padding-left: 12px; border-left: 2px solid #33405a; font-size: 13px; }
+  .step .label { color: var(--accent); font-weight: 600; }
+  .step .thought { color: #b9c2d4; }
+  .step .obs { color: var(--muted); white-space: pre-wrap; word-break: break-word; }
+  .hit { padding: 8px 0; border-bottom: 1px dashed var(--border); }
+  .hit .title { color: var(--accent); }
+  .hit .score { color: var(--muted); font-size: 11px; }
+  .hit .text { color: #b9c2d4; font-size: 13px; white-space: pre-wrap; }
+  .spinner { display: inline-block; animation: blink 1.2s infinite; }
+  @keyframes blink { 50% { opacity: .25; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>agentlab</h1>
+  <span class="stats" id="stats">加载中…</span>
+</header>
+
+<main>
+  <!-- 左栏：录入 + 文档列表 -->
+  <section>
+    <h2>录入知识</h2>
+    <input id="title" placeholder="标题（可选，默认取正文第一行）">
+    <textarea id="content" placeholder="粘贴一段文字……"></textarea>
+    <input id="url" placeholder="或者填一个网页地址 https://…（会抓取正文）">
+    <button id="btn-ingest">写入知识库</button>
+    <div class="msg" id="ingest-msg"></div>
+
+    <h2>知识库</h2>
+    <ul id="docs"><li class="meta">还没有内容</li></ul>
+  </section>
+
+  <!-- 右栏：对话 + 检索 -->
+  <section>
+    <h2>对话（SSE 流式）</h2>
+    <div id="chat-log"></div>
+    <form id="chat-form">
+      <input id="question" placeholder="问我：我之前记的 RAG 是什么？" autocomplete="off">
+      <button id="btn-chat">发送</button>
+    </form>
+
+    <h2>纯检索（不花 token）</h2>
+    <form id="search-form">
+      <input id="search-input" placeholder="关键词，例如：分块" autocomplete="off">
+      <button class="ghost" id="btn-search">检索</button>
+    </form>
+    <ol id="search-log"></ol>
+  </section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+
+async function api(path, options) {
+  const response = await fetch(path, options);
+  const text = await response.text();
+  if (!response.ok) throw new Error(text || response.statusText);
+  try { return JSON.parse(text); } catch { return text; }
+}
+
+function setMsg(el, text, kind) {
+  el.textContent = text;
+  el.className = 'msg' + (kind ? ' ' + kind : '');
+}
+
+// ---------- 统计与文档列表 ----------
+async function refresh() {
+  try {
+    const stats = await api('/api/stats');
+    $('stats').textContent =
+      `${stats.documents} 篇文档 / ${stats.chunks} 个片段 · 全文索引 ${stats.fts ? '已启用' : '未启用'}`;
+    const docs = await api('/api/docs?limit=20');
+    const list = $('docs');
+    list.innerHTML = '';
+    if (!docs.documents.length) {
+      list.innerHTML = '<li class="meta">还没有内容，先录一段吧</li>';
+      return;
+    }
+    for (const doc of docs.documents) {
+      const li = document.createElement('li');
+      const name = document.createElement('span');
+      name.textContent = doc.title;
+      const meta = document.createElement('span');
+      meta.className = 'meta';
+      meta.textContent = `${doc.chunk_count} 块 · ${doc.created_at.replace('T', ' ')}`;
+      li.append(name, meta);
+      list.appendChild(li);
+    }
+  } catch (error) {
+    $('stats').textContent = '服务不可用：' + error.message;
+  }
+}
+
+// ---------- 录入 ----------
+async function ingest() {
+  const title = $('title').value.trim();
+  const content = $('content').value.trim();
+  const url = $('url').value.trim();
+  if (!content && !url) { setMsg($('ingest-msg'), '请填文字或网址', 'err'); return; }
+
+  const button = $('btn-ingest');
+  button.disabled = true;
+  setMsg($('ingest-msg'), '正在写入…');
+  try {
+    const result = await api('/api/ingest', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: title || null, text: content || null, url: url || null }),
+    });
+    setMsg($('ingest-msg'), `已入库《${result.title}》：${result.char_count} 字 → ${result.chunk_count} 块`, 'ok');
+    $('title').value = ''; $('content').value = ''; $('url').value = '';
+    refresh();
+  } catch (error) {
+    setMsg($('ingest-msg'), '写入失败：' + error.message, 'err');
+  } finally {
+    button.disabled = false;
+  }
+}
+
+// ---------- 纯检索 ----------
+async function search() {
+  const query = $('search-input').value.trim();
+  if (!query) return;
+  const list = $('search-log');
+  list.innerHTML = '<li class="meta">检索中…</li>';
+  try {
+    const data = await api('/api/search?q=' + encodeURIComponent(query) + '&top_k=5');
+    list.innerHTML = '';
+    if (!data.hits.length) { list.innerHTML = '<li class="meta">没有找到相关内容</li>'; return; }
+    for (const hit of data.hits) {
+      const li = document.createElement('li');
+      li.className = 'hit';
+      li.innerHTML = `<div class="title">《${hit.title}》 <span class="score">${hit.score.toFixed(4)}</span></div>
+                      <div class="text">${hit.snippet}</div>`;
+      list.appendChild(li);
+    }
+  } catch (error) {
+    list.innerHTML = `<li class="meta">检索失败：${error.message}</li>`;
+  }
+}
+
+// ---------- 对话（SSE） ----------
+function addBubble(className, text) {
+  const div = document.createElement('div');
+  div.className = 'bubble ' + className;
+  div.textContent = text;
+  $('chat-log').appendChild(div);
+  $('chat-log').scrollTop = $('chat-log').scrollHeight;
+  return div;
+}
+
+function addStep(event) {
+  const div = document.createElement('div');
+  div.className = 'step';
+  let html = `<span class="label">[${event.index}] ${event.kind === 'final' ? '最终' : '行动'}</span>`;
+  if (event.thought) html += `<div class="thought">${escapeHtml(event.thought)}</div>`;
+  if (event.tool) {
+    const args = Object.entries(event.arguments || {}).map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(', ');
+    html += `<div class="thought">调用 ${escapeHtml(event.tool)}(${escapeHtml(args)})</div>`;
+  }
+  if (event.observation) html += `<div class="obs">${escapeHtml(event.observation).slice(0, 600)}</div>`;
+  div.innerHTML = html;
+  $('chat-log').appendChild(div);
+  $('chat-log').scrollTop = $('chat-log').scrollHeight;
+}
+
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, (ch) =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+}
+
+async function chat(question) {
+  addBubble('user', question);
+  const button = $('btn-chat');
+  button.disabled = true;
+  const placeholder = addBubble('note', '思考中 ');
+  placeholder.classList.add('spinner');
+
+  try {
+    const response = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question }),
+    });
+    if (!response.ok) throw new Error(await response.text());
+
+    // 手工解析 SSE：fetch 不能直接用 EventSource（那是 GET-only）
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      let index;
+      while ((index = buffer.indexOf('\n\n')) !== -1) {
+        const chunk = buffer.slice(0, index);
+        buffer = buffer.slice(index + 2);
+        if (!chunk.startsWith('data:')) continue;
+        let event;
+        try { event = JSON.parse(chunk.slice(5).trim()); } catch { continue; }
+        handleEvent(event);
+      }
+    }
+  } catch (error) {
+    placeholder.remove();
+    addBubble('err', '出错：' + error.message);
+  } finally {
+    button.disabled = false;
+    $('chat-log').scrollTop = $('chat-log').scrollHeight;
+  }
+
+  function handleEvent(event) {
+    if (event.type === 'step') {
+      placeholder.remove();
+      addStep(event);
+      return;
+    }
+    if (event.type === 'note') { placeholder.remove(); addBubble('note', event.text); return; }
+    if (event.type === 'error') { placeholder.remove(); addBubble('err', event.message); return; }
+    if (event.type === 'final') {
+      placeholder.remove();
+      addBubble('final', event.answer || '（没有答案）');
+      const usage = event.usage || {};
+      if (usage.total_tokens) addBubble('note', `本次消耗 ${usage.total_tokens} tokens`);
+    }
+  }
+}
+
+// ---------- 事件绑定 ----------
+$('btn-ingest').addEventListener('click', ingest);
+$('btn-search').addEventListener('click', (e) => { e.preventDefault(); search(); });
+$('search-input').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { e.preventDefault(); search(); }
+});
+$('chat-form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const question = $('question').value.trim();
+  if (!question) return;
+  $('question').value = '';
+  chat(question);
+});
+
+refresh();
+</script>
+</body>
+</html>

@@ -294,8 +294,8 @@ class IngestPipeline:
 
 
 def default_store(config: Config) -> Store:
-    """按配置打开默认数据库（``data/knowledge.db``）。"""
-    return Store(config.data_dir() / "knowledge.db")
+    """按配置打开默认数据库（``<data_dir>/knowledge.db``）。"""
+    return Store(config.ensure_data_dir() / "knowledge.db")
 
 
 def default_pipeline(config: Config, store: Store | None = None) -> IngestPipeline:
