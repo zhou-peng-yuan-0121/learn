@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 import time
 
@@ -29,6 +30,8 @@ def build_parser() -> argparse.ArgumentParser:
     demo = sub.add_parser("demo-llm", help="用 FakeLLM 演示流式输出（不需要 API key）")
     demo.add_argument("--speed", type=float, default=0.02,
                       help="每个片段之间的间隔秒数，默认 0.02")
+
+    sub.add_parser("show-tools", help="打印工具清单和自动生成的 JSON Schema")
 
     # -- 未来的子命令都会加在这里 --
     # sub.add_parser("serve", help="启动本地 HTTP 服务 / Web UI")
@@ -61,6 +64,23 @@ def run_demo_llm(speed: float) -> int:
     return 0
 
 
+def run_show_tools() -> int:
+    """打印工具清单——模型在提示词里看到的就是这份东西。"""
+    from .builtin_tools import default_registry
+
+    registry = default_registry()
+
+    print("=== 给提示词用的紧凑清单 ===")
+    print(registry.describe())
+
+    print("\n=== 结构化 JSON Schema（可直接放进请求体的 tools 字段）===")
+    print(json.dumps(registry.openai_schema(), ensure_ascii=False, indent=2))
+
+    print("\n=== 提示 ===")
+    print("这份 schema 是从函数签名自动生成的：改函数参数，这里跟着变，不需要手写。")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     """程序入口，返回退出码。"""
     # 最先加载 .env（在任何可能用到 API key 的操作之前）
@@ -89,6 +109,8 @@ def main(argv: list[str] | None = None) -> int:
     # 命令分发：每个子命令对应一个函数，保持 main() 只做「解析 + 分发」
     if args.command == "demo-llm":
         return run_demo_llm(args.speed)
+    if args.command == "show-tools":
+        return run_show_tools()
 
     logger.warning("命令 %r 尚未实现", args.command)
     return 1
