@@ -49,6 +49,12 @@ def build_parser() -> argparse.ArgumentParser:
     docs = sub.add_parser("docs", help="列出知识库里的文档")
     docs.add_argument("--limit", type=int, default=20)
 
+    search = sub.add_parser("search", help="检索知识库（不调用大模型，纯检索）")
+    search.add_argument("query", help="检索词")
+    search.add_argument("--top-k", type=int, default=5)
+    search.add_argument("--mode", choices=["hybrid", "keyword", "vector"], default="hybrid")
+    search.add_argument("--explain", action="store_true", help="显示每条结果来自哪一路")
+
     # -- 未来的子命令都会加在这里 --
     # sub.add_parser("serve", help="启动本地 HTTP 服务 / Web UI")
     # sub.add_parser("ingest", help="录入一篇知识")
@@ -126,10 +132,14 @@ def run_demo_agent(max_steps: int) -> int:
 
 
 def run_ask(config, question: str, max_steps: int) -> int:
-    """用真实模型回答一个问题。"""
+    """用真实模型回答一个问题（会自动挂上知识库检索工具）。"""
     from .agent import ReActAgent
     from .builtin_tools import default_registry
+    from .embedding import make_embedder
+    from .ingest import default_store
+    from .knowledge_tools import make_knowledge_tools
     from .llm import LLMError, make_llm
+    from .retrieval import HybridRetriever
 
     try:
         llm = make_llm(config)
@@ -138,11 +148,50 @@ def run_ask(config, question: str, max_steps: int) -> int:
         print("提示：先跑 `python -m agentlab demo-agent` 看看效果（不需要 key）。")
         return 1
 
-    agent = ReActAgent(llm, default_registry(), max_steps=max_steps)
-    print(f"用户：{question}")
-    result = agent.run(question)
+    # 工具表 = 通用工具 + 知识库检索工具
+    registry = default_registry()
+    store = default_store(config)
+    try:
+        retriever = HybridRetriever(store, make_embedder(config))
+        for spec in make_knowledge_tools(retriever).specs():
+            registry.add(spec)
+
+        agent = ReActAgent(llm, registry, max_steps=max_steps)
+        print(f"用户：{question}")
+        result = agent.run(question)
+    finally:
+        store.close()
+
     print_steps(result)
     return 0 if result.ok else 1
+
+
+def run_search(config, query: str, top_k: int, mode: str, explain: bool) -> int:
+    """纯检索，不经过大模型——调检索效果时最快的手段。"""
+    from .embedding import make_embedder
+    from .ingest import default_store
+    from .retrieval import HybridRetriever
+
+    store = default_store(config)
+    try:
+        retriever = HybridRetriever(store, make_embedder(config))
+        hits = retriever.search(query, top_k=top_k, mode=mode)
+        stats = store.stats()
+    finally:
+        store.close()
+
+    if not hits:
+        print(f"没有找到与 {query!r} 相关的内容。（库里有 {stats['documents']} 篇文档）")
+        return 0
+
+    print(f"查询：{query}    模式：{mode}    命中：{len(hits)}\n")
+    for index, hit in enumerate(hits, start=1):
+        print(f"[{index}]《{hit.title}》 融合分 {hit.score:.4f}")
+        if explain:
+            print(f"    来源：{hit.explain()}")
+        print(f"    {hit.snippet}")
+        print()
+    return 0
 
 
 def run_show_tools() -> int:
@@ -246,6 +295,8 @@ def main(argv: list[str] | None = None) -> int:
         return run_ingest(config, text=args.text, url=args.url, title=args.title)
     if args.command == "docs":
         return run_docs(config, args.limit)
+    if args.command == "search":
+        return run_search(config, args.query, args.top_k, args.mode, args.explain)
 
     logger.warning("命令 %r 尚未实现", args.command)
     return 1

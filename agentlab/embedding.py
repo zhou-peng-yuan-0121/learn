@@ -68,6 +68,11 @@ class HashingEmbedder:
     - 输出 L2 归一化，于是相似度直接就是点积。
     """
 
+    # 实测噪声下限：无关文本的余弦相似度可达 ~0.19（哈希碰撞），
+    # 真实匹配通常 > 0.4，所以把检索下限设在 0.3 能有效过滤噪声。
+    # 这是**实测值**，不是拍脑袋——换嵌入器必须重新测。
+    suggested_min_similarity = 0.3
+
     def __init__(self, dim: int = 512, ngram: int = 2) -> None:
         if dim < 8:
             raise ValueError("dim 至少 8")
@@ -117,6 +122,9 @@ class OpenAIEmbedder:
     （OpenAI / 智谱 / 硅基流动 / 本地 vLLM 等）并设置 AGENTLAB_EMBED_MODEL。
     """
 
+    # 真实语义模型的无关文本相似度通常在 0.1~0.3，相关文本 0.5~0.8
+    suggested_min_similarity = 0.25
+
     def __init__(self, config: Config, *, model: str | None = None) -> None:
         if not config.api_key:
             raise ValueError("使用 OpenAIEmbedder 需要配置 API key")
@@ -161,6 +169,8 @@ class OpenAIEmbedder:
 
 class FakeEmbedder:
     """测试用：把文本映射成可预测的向量（按字符和固定维度）。"""
+
+    suggested_min_similarity = 0.0  # 假向量没有语义，不做过滤
 
     def __init__(self, dim: int = 8) -> None:
         self.dim = dim
