@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools >= 61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agentlab"
+version = "0.1.0"
+description = "AI 个人知识库 Agent —— 把你日常的聊天、笔记、阅读链接变成可对话的 second brain"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = []
+
+[project.scripts]
+agentlab = "agentlab.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["agentlab*"]
