@@ -17,6 +17,9 @@ chroma_db/
 traces/
 *.trace.jsonl
 
+# 测试临时目录
+.tmp/
+
 # IDE
 .idea/
 .vscode/

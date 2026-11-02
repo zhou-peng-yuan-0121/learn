@@ -28,6 +28,11 @@ class Config:
     request_timeout: float = 60.0
     max_retries: int = 3
 
+    # ----- Embedding -----
+    # 留空 = 用内置的离线 HashingEmbedder（不花钱、确定性、可测）；
+    # 填了模型名且配了 key = 走 OpenAI 兼容的 /embeddings 接口。
+    embed_model: str = ""
+
     # ----- HTTP 服务 -----
     host: str = "127.0.0.1"
     port: int = 7860
@@ -62,6 +67,7 @@ class Config:
             base_url=pick("AGENTLAB_BASE_URL", "https://api.deepseek.com/v1").rstrip("/"),
             api_key=pick("AGENTLAB_API_KEY", ""),
             model=pick("AGENTLAB_MODEL", "deepseek-chat"),
+            embed_model=pick("AGENTLAB_EMBED_MODEL", ""),
             host=pick("AGENTLAB_HOST", "127.0.0.1"),
             port=pick_int("AGENTLAB_PORT", 7860),
             log_level=log_level,

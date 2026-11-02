@@ -40,6 +40,15 @@ def build_parser() -> argparse.ArgumentParser:
     ask.add_argument("question", help="你要问的问题")
     ask.add_argument("--max-steps", type=int, default=6, help="最多迭代步数")
 
+    ingest = sub.add_parser("ingest", help="把一段文字或一个网页录入知识库")
+    source = ingest.add_mutually_exclusive_group(required=True)
+    source.add_argument("--text", help="要录入的文本")
+    source.add_argument("--url", help="要抓取并录入的网页地址")
+    ingest.add_argument("--title", help="文档标题（不给则取第一行/网页标题）")
+
+    docs = sub.add_parser("docs", help="列出知识库里的文档")
+    docs.add_argument("--limit", type=int, default=20)
+
     # -- 未来的子命令都会加在这里 --
     # sub.add_parser("serve", help="启动本地 HTTP 服务 / Web UI")
     # sub.add_parser("ingest", help="录入一篇知识")
@@ -153,6 +162,52 @@ def run_show_tools() -> int:
     return 0
 
 
+def run_ingest(config, *, text: str | None, url: str | None, title: str | None) -> int:
+    """录入一段文本或一个网页。"""
+    from .ingest import IngestError, default_pipeline
+
+    pipeline = default_pipeline(config)
+    try:
+        if url:
+            print(f"正在抓取 {url} …")
+            result = pipeline.ingest_url(url)
+        else:
+            result = pipeline.ingest_text(text or "", title=title)
+    except IngestError as exc:
+        print(f"摄取失败：{exc}")
+        return 1
+    finally:
+        pipeline.store.close()
+
+    print(result.summary())
+    return 0
+
+
+def run_docs(config, limit: int) -> int:
+    """列出知识库中的文档。"""
+    from .ingest import default_store
+
+    store = default_store(config)
+    try:
+        documents = store.list_documents(limit)
+        if not documents:
+            print("知识库还是空的。先录一点东西：")
+            print('  python -m agentlab ingest --text "今天读了一篇关于 RAG 的文章……" --title "读书笔记"')
+            return 0
+
+        print(f"{'ID':<4} {'块数':>4}  {'创建时间':<20} 标题")
+        print("-" * 70)
+        for doc in documents:
+            print(f"{doc.id:<4} {doc.chunk_count:>4}  {doc.created_at:<20} {doc.title}")
+
+        stats = store.stats()
+        print(f"\n共 {stats['documents']} 篇 / {stats['chunks']} 块")
+        print(f"数据库：{stats['path']}")
+    finally:
+        store.close()
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     """程序入口，返回退出码。"""
     # 最先加载 .env（在任何可能用到 API key 的操作之前）
@@ -187,6 +242,10 @@ def main(argv: list[str] | None = None) -> int:
         return run_demo_agent(args.max_steps)
     if args.command == "ask":
         return run_ask(config, args.question, args.max_steps)
+    if args.command == "ingest":
+        return run_ingest(config, text=args.text, url=args.url, title=args.title)
+    if args.command == "docs":
+        return run_docs(config, args.limit)
 
     logger.warning("命令 %r 尚未实现", args.command)
     return 1
